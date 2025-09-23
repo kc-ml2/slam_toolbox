@@ -2285,7 +2285,7 @@ void Mapper::InitializeParameters()
     "Minimum value of the distance penalty multiplier so scores do not "
     "become too small.",
     0.5, GetParameterManager());
-  
+
   m_pUseResponseExpansion = new Parameter<kt_bool>(
     "UseResponseExpansion",
     "Whether to increase the search space if no good matches are initially "
@@ -2298,7 +2298,7 @@ void Mapper::InitializeParameters()
     "or unoccupied.  This prevents stray beams from messing up the map. "
     "found.",
     2, GetParameterManager());
-  
+
   m_pOccupancyThreshold = new Parameter<kt_double>(
     "OccupancyThreshold",
     "Minimum ratio of beams hitting cell to beams passing through cell to be marked as occupied",
