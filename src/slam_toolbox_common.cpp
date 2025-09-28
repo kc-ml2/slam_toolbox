@@ -168,6 +168,7 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
                              std::weak_ptr<rclcpp::Clock> clock,
                              std::function<void()> republish_graph)
     : pub_(std::move(pub)), graph_pub_(std::move(graph_pub)), clock_(std::move(clock)), republish_graph_(std::move(republish_graph)) {}
+  
     void EndLoopClosure(const std::string & /*rInfo*/) override {
       auto spub = pub_.lock();
       auto sclk = clock_.lock();
@@ -188,6 +189,7 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
   auto republish_graph_cb = [this]() {
     this->publishPoseGraph();
   };
+  
   loop_closure_listener_ = std::make_unique<ClosureListener>(loop_closure_event_pub_, pose_graph_pub_, this->get_clock(), republish_graph_cb);
   smapper_->getMapper()->AddListener(loop_closure_listener_.get());
   reprocessing_transform_.setIdentity();
@@ -1005,7 +1007,9 @@ void SlamToolbox::publishPoseGraph()
 
       karto::Matrix3 cov = link_info->GetCovariance();
       const double eps = 1e-9;
-      cov(0, 0) += eps; cov(1, 1) += eps; cov(2, 2) += eps;
+      cov(0, 0) += eps;
+      cov(1, 1) += eps;
+      cov(2, 2) += eps;
       karto::Matrix3 info = cov.Inverse();
       for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 3; ++c) {
