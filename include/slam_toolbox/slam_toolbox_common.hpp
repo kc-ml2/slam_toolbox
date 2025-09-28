@@ -52,12 +52,7 @@
 #include "slam_toolbox/laser_utils.hpp"
 #include "slam_toolbox/get_pose_helper.hpp"
 #include "slam_toolbox/map_saver.hpp"
-#include "slam_toolbox/loop_closure_assistant.hpp" 
-#include "slam_toolbox/msg/pose_graph.hpp"
-#include "slam_toolbox/msg/graph_node.hpp"
-#include "slam_toolbox/msg/graph_edge.hpp"
-#include "slam_toolbox/msg/new_node_event.hpp"
-#include "slam_toolbox/msg/loop_closure_event.hpp"
+#include "slam_toolbox/loop_closure_assistant.hpp"
 
 
 namespace slam_toolbox
@@ -140,7 +135,6 @@ protected:
     const Matrix3 & cov,
     const rclcpp::Time & t);
   void publishPoseGraph();
-  uint64_t graph_revision_ = 0;
   void publishNewNodeEvent(const karto::LocalizedRangeScan* lrs);
 
 
