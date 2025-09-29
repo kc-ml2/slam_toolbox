@@ -22,12 +22,7 @@
 #include <chrono>
 #include "slam_toolbox/slam_toolbox_common.hpp"
 #include "slam_toolbox/serialization.hpp"
-#include "slam_toolbox/msg/pose_graph.hpp"
-#include "slam_toolbox/msg/graph_node.hpp"
-#include "slam_toolbox/msg/graph_edge.hpp"
-#include "slam_toolbox/loop_closure_assistant.hpp"
-#include "slam_toolbox/msg/new_node_event.hpp"
-#include "slam_toolbox/msg/loop_closure_event.hpp"
+#include "slam_toolbox/loop_closure_listener.hpp"
 
 namespace slam_toolbox
 {
@@ -160,39 +155,19 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
     shared_from_this(), smapper_->getMapper(), scan_holder_.get(),
     state_, processor_type_);
 
-  // Register a listener with Karto to publish automatic loop closure events
-  class ClosureListener : public karto::MapperLoopClosureListener {
-  public:
-    explicit ClosureListener(std::weak_ptr<rclcpp_lifecycle::LifecyclePublisher<slam_toolbox::msg::LoopClosureEvent>> pub,
-                             std::weak_ptr<rclcpp_lifecycle::LifecyclePublisher<slam_toolbox::msg::PoseGraph>> graph_pub,
-                             std::weak_ptr<rclcpp::Clock> clock,
-                             std::function<void()> republish_graph)
-    : pub_(std::move(pub)), graph_pub_(std::move(graph_pub)), clock_(std::move(clock)), republish_graph_(std::move(republish_graph)) {}
-  
-    void EndLoopClosure(const std::string & /*rInfo*/) override {
-      auto spub = pub_.lock();
-      auto sclk = clock_.lock();
-      if (!spub || !sclk) { return; }
-      slam_toolbox::msg::LoopClosureEvent ev;
-      ev.stamp = sclk->now();
-      spub->publish(ev);
-      // Immediately republish the current pose graph after the event
-      if (republish_graph_) { republish_graph_(); }
-    }
-  private:
-    std::weak_ptr<rclcpp_lifecycle::LifecyclePublisher<slam_toolbox::msg::LoopClosureEvent>> pub_;
-    std::weak_ptr<rclcpp_lifecycle::LifecyclePublisher<slam_toolbox::msg::PoseGraph>> graph_pub_;
-    std::weak_ptr<rclcpp::Clock> clock_;
-    std::function<void()> republish_graph_;
-  };
-
-  auto republish_graph_cb = [this]() {
+  auto republish_graph_callback = [this]() {
     this->publishPoseGraph();
   };
   
-  loop_closure_listener_ = std::make_unique<ClosureListener>(loop_closure_event_pub_, pose_graph_pub_, this->get_clock(), republish_graph_cb);
+  loop_closure_listener_ =
+    std::make_unique<slam_toolbox::LoopClosureListener>(
+      loop_closure_event_pub_,
+      this->get_clock(),
+      republish_graph_callback
+    );
   smapper_->getMapper()->AddListener(loop_closure_listener_.get());
-  reprocessing_transform_.setIdentity();
+
+    reprocessing_transform_.setIdentity();
 
   double transform_publish_period = 0.05;
   if (!this->has_parameter("transform_publish_period")) {
@@ -229,6 +204,7 @@ CallbackReturn SlamToolbox::on_deactivate(const rclcpp_lifecycle::State &)
     smapper_->getMapper()->RemoveListener(loop_closure_listener_.get());
   }
   loop_closure_listener_.reset();
+
   sst_->on_deactivate();
   sstm_->on_deactivate();
   pose_pub_->on_deactivate();
@@ -958,7 +934,6 @@ void SlamToolbox::publishPoseGraph()
 
     msg.header.stamp = this->get_clock()->now();
     msg.header.frame_id = map_frame_;
-    msg.revision = ++graph_revision_;
 
     VerticeMap mapper_vertices = graph->GetVertices();
     for (auto vertex_map_it = mapper_vertices.begin();
@@ -1007,9 +982,7 @@ void SlamToolbox::publishPoseGraph()
 
       karto::Matrix3 cov = link_info->GetCovariance();
       const double eps = 1e-9;
-      cov(0, 0) += eps;
-      cov(1, 1) += eps;
-      cov(2, 2) += eps;
+      cov(0, 0) += eps; cov(1, 1) += eps; cov(2, 2) += eps;
       karto::Matrix3 info = cov.Inverse();
       for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 3; ++c) {
