@@ -982,7 +982,9 @@ void SlamToolbox::publishPoseGraph()
 
       karto::Matrix3 cov = link_info->GetCovariance();
       const double eps = 1e-9;
-      cov(0, 0) += eps; cov(1, 1) += eps; cov(2, 2) += eps;
+      cov(0, 0) += eps;
+      cov(1, 1) += eps;
+      cov(2, 2) += eps;
       karto::Matrix3 info = cov.Inverse();
       for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 3; ++c) {
