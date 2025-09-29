@@ -193,7 +193,6 @@ protected:
   std::unique_ptr<map_saver::MapSaver> map_saver_;
   std::unique_ptr<loop_closure_assistant::LoopClosureAssistant> closure_assistant_;
   std::unique_ptr<laser_utils::ScanHolder> scan_holder_;
-  // Listener that captures automatic loop closure events from Karto
   std::unique_ptr<slam_toolbox::LoopClosureListener> loop_closure_listener_;
 
   // Internal state
