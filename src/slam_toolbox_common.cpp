@@ -981,14 +981,9 @@ void SlamToolbox::publishPoseGraph()
       edge_msg.relative_pose.theta = rel_pose.GetHeading();
 
       karto::Matrix3 cov = link_info->GetCovariance();
-      const double eps = 1e-9;
-      cov(0, 0) += eps;
-      cov(1, 1) += eps;
-      cov(2, 2) += eps;
-      karto::Matrix3 info = cov.Inverse();
       for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 3; ++c) {
-          edge_msg.information_matrix[r * 3 + c] = info(r, c);
+          edge_msg.covariance[r * 3 + c] = cov(r, c);  
         }
       }
 
