@@ -53,6 +53,7 @@
 #include "slam_toolbox/get_pose_helper.hpp"
 #include "slam_toolbox/map_saver.hpp"
 #include "slam_toolbox/loop_closure_assistant.hpp"
+#include "slam_toolbox/loop_closure_listener.hpp"
 
 namespace slam_toolbox
 {
@@ -193,7 +194,7 @@ protected:
   std::unique_ptr<loop_closure_assistant::LoopClosureAssistant> closure_assistant_;
   std::unique_ptr<laser_utils::ScanHolder> scan_holder_;
   // Listener that captures automatic loop closure events from Karto
-  std::unique_ptr<karto::MapperLoopClosureListener> loop_closure_listener_;
+  std::unique_ptr<slam_toolbox::LoopClosureListener> loop_closure_listener_;
 
   // Internal state
   std::vector<std::unique_ptr<boost::thread>> threads_;
