@@ -155,7 +155,7 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
     shared_from_this(), smapper_->getMapper(), scan_holder_.get(),
     state_, processor_type_);
 
-  auto republish_graph_callback = [this]() {
+  auto loop_closure_publish_graph = [this]() {
     this->publishPoseGraph();
   };
   
@@ -163,7 +163,7 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
     std::make_unique<slam_toolbox::LoopClosureListener>(
       loop_closure_event_pub_,
       this->get_clock(),
-      republish_graph_callback
+      loop_closure_publish_graph
     );
   smapper_->getMapper()->AddListener(loop_closure_listener_.get());
 
