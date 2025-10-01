@@ -167,7 +167,7 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
     );
   smapper_->getMapper()->AddListener(loop_closure_listener_.get());
 
-    reprocessing_transform_.setIdentity();
+  reprocessing_transform_.setIdentity();
 
   double transform_publish_period = 0.05;
   if (!this->has_parameter("transform_publish_period")) {
@@ -477,9 +477,9 @@ void SlamToolbox::setROSInterfaces()
     "slam_toolbox/pose_graph",
     rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
   new_node_event_pub_ = this->create_publisher<slam_toolbox::msg::NewNodeEvent>(
-  "slam_toolbox/new_node_event", 10);
+    "slam_toolbox/new_node_event", 10);
   loop_closure_event_pub_ = this->create_publisher<slam_toolbox::msg::LoopClosureEvent>(
-  "slam_toolbox/loop_closure_event", 10);
+    "slam_toolbox/loop_closure_event", 10);
   scan_filter_sub_ =
     std::make_unique<message_filters::Subscriber<sensor_msgs::msg::LaserScan,
       rclcpp_lifecycle::LifecycleNode>>(
