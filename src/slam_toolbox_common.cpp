@@ -476,6 +476,7 @@ void SlamToolbox::setROSInterfaces()
     "slam_toolbox/new_node_event", 10);
   loop_closure_event_pub_ = this->create_publisher<slam_toolbox::msg::LoopClosureEvent>(
     "slam_toolbox/loop_closure_event", 10);
+
   scan_filter_sub_ =
     std::make_unique<message_filters::Subscriber<sensor_msgs::msg::LaserScan,
       rclcpp_lifecycle::LifecycleNode>>(
@@ -984,6 +985,7 @@ void SlamToolbox::publishPoseGraph()
 
   pose_graph_pub_->publish(msg);
 }
+
 /*****************************************************************************/
 void SlamToolbox::publishNewNodeEvent(const karto::LocalizedRangeScan* lrs)
 /*****************************************************************************/

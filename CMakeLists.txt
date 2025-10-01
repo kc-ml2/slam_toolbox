@@ -119,7 +119,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   msg/GraphNode.msg
   msg/GraphEdge.msg
   msg/PoseGraph.msg
-
   DEPENDENCIES builtin_interfaces geometry_msgs std_msgs nav_msgs visualization_msgs
 )
 

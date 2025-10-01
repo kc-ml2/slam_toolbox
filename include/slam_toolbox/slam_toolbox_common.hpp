@@ -138,7 +138,6 @@ protected:
   void publishPoseGraph();
   void publishNewNodeEvent(const karto::LocalizedRangeScan* lrs);
 
-
   // pausing bits
   bool isPaused(const PausedApplication & app);
   bool pauseNewMeasurementsCallback(
@@ -163,8 +162,6 @@ protected:
       slam_toolbox::msg::NewNodeEvent>> new_node_event_pub_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<
       slam_toolbox::msg::LoopClosureEvent>> loop_closure_event_pub_;
-
-
   std::shared_ptr<rclcpp::Service<nav_msgs::srv::GetMap>> ssMap_;
   std::shared_ptr<rclcpp::Service<slam_toolbox::srv::Pause>> ssPauseMeasurements_;
   std::shared_ptr<rclcpp::Service<slam_toolbox::srv::SerializePoseGraph>> ssSerialize_;
