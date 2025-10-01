@@ -45,5 +45,4 @@
 #include "slam_toolbox/msg/new_node_event.hpp"
 #include "slam_toolbox/msg/loop_closure_event.hpp"
 
-
 #endif  // SLAM_TOOLBOX__TOOLBOX_MSGS_HPP_
