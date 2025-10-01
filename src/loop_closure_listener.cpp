@@ -3,24 +3,24 @@
 namespace slam_toolbox {
 
 LoopClosureListener::LoopClosureListener(
-    std::weak_ptr<rclcpp_lifecycle::LifecyclePublisher<slam_toolbox::msg::LoopClosureEvent>> pub,
+    std::weak_ptr<rclcpp_lifecycle::LifecyclePublisher<slam_toolbox::msg::LoopClosureEvent>> loop_closure_event_pub,
     std::weak_ptr<rclcpp::Clock> clock,
-    std::function<void()> republish_graph)
-: pub_(std::move(pub)), clock_(std::move(clock)), republish_graph_(std::move(republish_graph)) {}
+    std::function<void()> loop_closure_publish_graph)
+: loop_closure_event_pub_(std::move(loop_closure_event_pub)), clock_(std::move(clock)), loop_closure_publish_graph_(std::move(loop_closure_publish_graph)) {}
 
 void LoopClosureListener::EndLoopClosure(const std::string & /*rInfo*/) {
-  auto spub = pub_.lock();
+  auto spub = loop_closure_event_pub_.lock();
   auto sclk = clock_.lock();
   if (!spub || !sclk) {
     return; 
   }
 
-  slam_toolbox::msg::LoopClosureEvent ev;
-  ev.stamp = sclk->now();    
-  spub->publish(ev);
+  slam_toolbox::msg::LoopClosureEvent event;
+  event.stamp = sclk->now();
+  spub->publish(event);
 
-  if (republish_graph_) {
-    republish_graph_();
+  if (loop_closure_publish_graph_) {
+    loop_closure_publish_graph_();
   }
 }
 
