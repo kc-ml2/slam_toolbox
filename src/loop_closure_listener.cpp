@@ -14,7 +14,7 @@ void LoopClosureListener::EndLoopClosure(const std::string & /*rInfo*/) {
   auto spub = loop_closure_event_pub_.lock();
   auto sclk = clock_.lock();
   if (!spub || !sclk) {
-    return; 
+    return;
   }
 
   slam_toolbox::msg::LoopClosureEvent event;

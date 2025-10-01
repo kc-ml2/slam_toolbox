@@ -974,7 +974,7 @@ void SlamToolbox::publishPoseGraph()
       karto::Matrix3 cov = link_info->GetCovariance();
       for (int r = 0; r < 3; ++r) {
         for (int c = 0; c < 3; ++c) {
-          edge_msg.covariance[r * 3 + c] = cov(r, c);  
+          edge_msg.covariance[r * 3 + c] = cov(r, c);
         }
       }
 
