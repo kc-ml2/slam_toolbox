@@ -811,6 +811,15 @@ bool SlamToolbox::shouldProcessScan(
 /*****************************************************************************/
 LocalizedRangeScan * SlamToolbox::addScan(
   LaserRangeFinder * laser,
+  PosedScan & scan_w_pose)
+/*****************************************************************************/
+{
+  return addScan(laser, scan_w_pose.scan, scan_w_pose.pose);
+}
+
+/*****************************************************************************/
+LocalizedRangeScan * SlamToolbox::addScan(
+  LaserRangeFinder * laser,
   const sensor_msgs::msg::LaserScan::ConstSharedPtr & scan,
   Pose2 & odom_pose)
 /*****************************************************************************/
