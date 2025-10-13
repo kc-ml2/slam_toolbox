@@ -830,50 +830,55 @@ LocalizedRangeScan * SlamToolbox::addScan(
     laser, scan, odom_pose);
 
   // Add the localized range scan to the smapper
-  boost::mutex::scoped_lock lock(smapper_mutex_);
   bool processed = false, update_reprocessing_transform = false;
-
   Matrix3 covariance;
   covariance.SetToIdentity();
 
-  if (processor_type_ == PROCESS) {
-    processed = smapper_->getMapper()->Process(range_scan, &covariance);
-  } else if (processor_type_ == PROCESS_FIRST_NODE) {
-    processed = smapper_->getMapper()->ProcessAtDock(range_scan, &covariance);
-    processor_type_ = PROCESS;
-    update_reprocessing_transform = true;
-  } else if (processor_type_ == PROCESS_NEAR_REGION) {
-    boost::mutex::scoped_lock l(pose_mutex_);
-    if (!process_near_pose_) {
-      RCLCPP_ERROR(get_logger(), "Process near region called without a "
-        "valid region request. Ignoring scan.");
-      return nullptr;
+  {
+    boost::mutex::scoped_lock lock(smapper_mutex_);
+
+    if (processor_type_ == PROCESS) {
+      processed = smapper_->getMapper()->Process(range_scan, &covariance);
+    } else if (processor_type_ == PROCESS_FIRST_NODE) {
+      processed = smapper_->getMapper()->ProcessAtDock(range_scan, &covariance);
+      processor_type_ = PROCESS;
+      update_reprocessing_transform = true;
+    } else if (processor_type_ == PROCESS_NEAR_REGION) {
+      boost::mutex::scoped_lock l(pose_mutex_);
+      if (!process_near_pose_) {
+        RCLCPP_ERROR(get_logger(), "Process near region called without a "
+          "valid region request. Ignoring scan.");
+        return nullptr;
+      }
+      range_scan->SetOdometricPose(*process_near_pose_);
+      range_scan->SetCorrectedPose(range_scan->GetOdometricPose());
+      process_near_pose_.reset(nullptr);
+      processed = smapper_->getMapper()->ProcessAgainstNodesNearBy(
+        range_scan, false, &covariance);
+      update_reprocessing_transform = true;
+      processor_type_ = PROCESS;
+    } else {
+      RCLCPP_FATAL(get_logger(),
+        "SlamToolbox: No valid processor type set! Exiting.");
+      exit(-1);
     }
-    range_scan->SetOdometricPose(*process_near_pose_);
-    range_scan->SetCorrectedPose(range_scan->GetOdometricPose());
-    process_near_pose_.reset(nullptr);
-    processed = smapper_->getMapper()->ProcessAgainstNodesNearBy(
-      range_scan, false, &covariance);
-    update_reprocessing_transform = true;
-    processor_type_ = PROCESS;
-  } else {
-    RCLCPP_FATAL(get_logger(),
-      "SlamToolbox: No valid processor type set! Exiting.");
-    exit(-1);
+
+    // if successfully processed, create odom to map transformation
+    // and add our scan to storage
+    if (processed) {
+      if (enable_interactive_mode_) {
+        scan_holder_->addScan(*scan);
+      }
+
+      setTransformFromPoses(range_scan->GetCorrectedPose(), odom_pose,
+        scan->header.stamp, update_reprocessing_transform);
+      dataset_->Add(range_scan);
+      publishNewNodeEvent(range_scan);
+    }
   }
 
-  // if successfully processed, create odom to map transformation
-  // and add our scan to storage
+  // Publish outside the mutex to avoid long hold times
   if (processed) {
-    if (enable_interactive_mode_) {
-      scan_holder_->addScan(*scan);
-    }
-
-    setTransformFromPoses(range_scan->GetCorrectedPose(), odom_pose,
-      scan->header.stamp, update_reprocessing_transform);
-    dataset_->Add(range_scan);
-    publishNewNodeEvent(range_scan);
-
     publishPose(range_scan->GetCorrectedPose(), covariance, scan->header.stamp);
     publishPoseGraph();
   } else {
