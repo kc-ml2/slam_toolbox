@@ -924,68 +924,71 @@ void SlamToolbox::publishPoseGraph()
 
   slam_toolbox::msg::PoseGraph msg;
 
+  boost::unique_lock<boost::mutex> lock(smapper_mutex_, boost::defer_lock);
+  if (!lock.try_lock()) {
+    RCLCPP_WARN(get_logger(), "Cannot acquire mutex for pose graph - skipping this update");
+    return;
+  }
+
+  auto * graph = smapper_->getMapper()->GetGraph();
+  if (!graph) return;
+
+  msg.header.stamp = this->get_clock()->now();
+  msg.header.frame_id = map_frame_;
+
+  VerticeMap mapper_vertices = graph->GetVertices();
+  for (auto vertex_map_it = mapper_vertices.begin();
+       vertex_map_it != mapper_vertices.end(); ++vertex_map_it)
   {
-    boost::mutex::scoped_lock lock(smapper_mutex_);
-    auto * graph = smapper_->getMapper()->GetGraph();
-    if (!graph) return;
-
-    msg.header.stamp = this->get_clock()->now();
-    msg.header.frame_id = map_frame_;
-
-    VerticeMap mapper_vertices = graph->GetVertices();
-    for (auto vertex_map_it = mapper_vertices.begin();
-         vertex_map_it != mapper_vertices.end(); ++vertex_map_it)
+    for (auto vertex_it = vertex_map_it->second.begin();
+         vertex_it != vertex_map_it->second.end(); ++vertex_it)
     {
-      for (auto vertex_it = vertex_map_it->second.begin();
-           vertex_it != vertex_map_it->second.end(); ++vertex_it)
-      {
-        if (!vertex_it->second) { continue; }
-        auto * lrs = vertex_it->second->GetObject();
-        if (!lrs) { continue; }
+      if (!vertex_it->second) { continue; }
+      auto * lrs = vertex_it->second->GetObject();
+      if (!lrs) { continue; }
 
-        slam_toolbox::msg::GraphNode node_msg;
-        node_msg.node_id = lrs->GetUniqueId();
-        node_msg.pose.x = lrs->GetCorrectedPose().GetX();
-        node_msg.pose.y = lrs->GetCorrectedPose().GetY();
-        node_msg.pose.theta = lrs->GetCorrectedPose().GetHeading();
-        msg.nodes.push_back(node_msg);
+      slam_toolbox::msg::GraphNode node_msg;
+      node_msg.node_id = lrs->GetUniqueId();
+      node_msg.pose.x = lrs->GetCorrectedPose().GetX();
+      node_msg.pose.y = lrs->GetCorrectedPose().GetY();
+      node_msg.pose.theta = lrs->GetCorrectedPose().GetHeading();
+      msg.nodes.push_back(node_msg);
+    }
+  }
+
+  EdgeVector mapper_edges = graph->GetEdges();
+  for (auto edges_it = mapper_edges.begin();
+       edges_it != mapper_edges.end(); ++edges_it)
+  {
+    if (!(*edges_it)) { continue; }
+
+    slam_toolbox::msg::GraphEdge edge_msg;
+    auto * src = (*edges_it)->GetSource();
+    auto * dst = (*edges_it)->GetTarget();
+    if (!src || !dst || !src->GetObject() || !dst->GetObject()) {
+      continue;
+    }
+    edge_msg.source_id = src->GetObject()->GetUniqueId();
+    edge_msg.target_id = dst->GetObject()->GetUniqueId();
+
+    karto::EdgeLabel * base_label = (*edges_it)->GetLabel();
+    if (!base_label) { continue; }
+    auto * link_info = dynamic_cast<karto::LinkInfo *>(base_label);
+    if (!link_info) { continue; }
+
+    karto::Pose2 rel_pose = link_info->GetPoseDifference();
+    edge_msg.relative_pose.x = rel_pose.GetX();
+    edge_msg.relative_pose.y = rel_pose.GetY();
+    edge_msg.relative_pose.theta = rel_pose.GetHeading();
+
+    karto::Matrix3 cov = link_info->GetCovariance();
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 3; ++c) {
+        edge_msg.covariance[r * 3 + c] = cov(r, c);
       }
     }
 
-    EdgeVector mapper_edges = graph->GetEdges();
-    for (auto edges_it = mapper_edges.begin();
-         edges_it != mapper_edges.end(); ++edges_it)
-    {
-      if (!(*edges_it)) { continue; }
-
-      slam_toolbox::msg::GraphEdge edge_msg;
-      auto * src = (*edges_it)->GetSource();
-      auto * dst = (*edges_it)->GetTarget();
-      if (!src || !dst || !src->GetObject() || !dst->GetObject()) {
-        continue;
-      }
-      edge_msg.source_id = src->GetObject()->GetUniqueId();
-      edge_msg.target_id = dst->GetObject()->GetUniqueId();
-
-      karto::EdgeLabel * base_label = (*edges_it)->GetLabel();
-      if (!base_label) { continue; }
-      auto * link_info = dynamic_cast<karto::LinkInfo *>(base_label);
-      if (!link_info) { continue; }
-
-      karto::Pose2 rel_pose = link_info->GetPoseDifference();
-      edge_msg.relative_pose.x = rel_pose.GetX();
-      edge_msg.relative_pose.y = rel_pose.GetY();
-      edge_msg.relative_pose.theta = rel_pose.GetHeading();
-
-      karto::Matrix3 cov = link_info->GetCovariance();
-      for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-          edge_msg.covariance[r * 3 + c] = cov(r, c);
-        }
-      }
-
-      msg.edges.push_back(edge_msg);
-    }
+    msg.edges.push_back(edge_msg);
   }
 
   pose_graph_pub_->publish(msg);
