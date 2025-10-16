@@ -892,7 +892,7 @@ LocalizedRangeScan * SlamToolbox::addScan(
   // Publish outside the mutex to avoid long hold times
   if (processed) {
     publishPose(range_scan->GetCorrectedPose(), covariance, scan->header.stamp);
-    publishPoseGraph();
+    requestPoseGraphPublish();
   } else {
     delete range_scan;
     range_scan = nullptr;
@@ -1243,7 +1243,7 @@ bool SlamToolbox::deserializePoseGraphCallback(
 void SlamToolbox::loopClosurePublishGraphCallback()
 /*****************************************************************************/
 {
-  publishPoseGraph();
+  requestPoseGraphPublish();
 }
 
 }  // namespace slam_toolbox
