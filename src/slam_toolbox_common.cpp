@@ -177,10 +177,12 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
       boost::bind(&SlamToolbox::publishVisualizations, this)));
 
   // Create pose graph publish timer (10Hz)
+  RCLCPP_INFO(get_logger(), "[DEBUG] Creating pose graph publish timer (10Hz - 100ms interval)");
   pose_graph_timer_ = this->create_wall_timer(
     std::chrono::milliseconds(100),
     std::bind(&SlamToolbox::poseGraphPublishTimerCallback, this)
   );
+  RCLCPP_INFO(get_logger(), "[DEBUG] Pose graph timer created successfully");
 
   if (use_lifecycle_manager_) {
     // create bond connection
@@ -892,6 +894,7 @@ LocalizedRangeScan * SlamToolbox::addScan(
   // Publish outside the mutex to avoid long hold times
   if (processed) {
     publishPose(range_scan->GetCorrectedPose(), covariance, scan->header.stamp);
+    RCLCPP_INFO(get_logger(), "[DEBUG] addScan(): Scan processed successfully, requesting pose graph publish");
     requestPoseGraphPublish();
   } else {
     delete range_scan;
@@ -939,15 +942,28 @@ void SlamToolbox::poseGraphPublishTimerCallback()
 /*****************************************************************************/
 {
   // Check if pose graph publishing was requested
-  if (publish_pose_graph_requested_.exchange(false)) {
+  bool was_requested = publish_pose_graph_requested_.exchange(false);
+  
+  if (was_requested) {
+    RCLCPP_INFO(get_logger(), "[DEBUG] Timer callback: Flag was TRUE, processing request");
+    
     // Try to acquire mutex with try_lock
     boost::unique_lock<boost::mutex> lock(smapper_mutex_, boost::defer_lock);
     if (lock.try_lock()) {
       // Successfully acquired mutex, publish pose graph
+      RCLCPP_INFO(get_logger(), "[DEBUG] Timer callback: Mutex acquired successfully, calling publishPoseGraph()");
       publishPoseGraph();
     } else {
       // Failed to acquire mutex, set the flag again to retry later
+      RCLCPP_WARN(get_logger(), "[DEBUG] Timer callback: Mutex BUSY, setting flag back to TRUE for retry");
       publish_pose_graph_requested_.store(true);
+    }
+  } else {
+    // No request pending - this is normal and happens frequently
+    static int no_request_count = 0;
+    no_request_count++;
+    if (no_request_count % 50 == 0) {  // Log every 5 seconds (50 * 100ms)
+      RCLCPP_DEBUG(get_logger(), "[DEBUG] Timer callback: No request pending (count: %d)", no_request_count);
     }
   }
 }
@@ -956,10 +972,15 @@ void SlamToolbox::poseGraphPublishTimerCallback()
 void SlamToolbox::publishPoseGraph()
 /*****************************************************************************/
 {
+  RCLCPP_INFO(get_logger(), "[DEBUG] publishPoseGraph() STARTED");
+  
   if (pose_graph_pub_->get_subscription_count() == 0) {
+    RCLCPP_WARN(get_logger(), "[DEBUG] publishPoseGraph(): No subscribers, skipping");
     return;
   }
 
+  RCLCPP_INFO(get_logger(), "[DEBUG] publishPoseGraph(): %zu subscribers found, proceeding", 
+               pose_graph_pub_->get_subscription_count());
   slam_toolbox::msg::PoseGraph msg;
 
   auto * graph = smapper_->getMapper()->GetGraph();
@@ -1023,7 +1044,10 @@ void SlamToolbox::publishPoseGraph()
     msg.edges.push_back(edge_msg);
   }
 
+  RCLCPP_INFO(get_logger(), "[DEBUG] publishPoseGraph(): Publishing message with %zu nodes and %zu edges", 
+               msg.nodes.size(), msg.edges.size());
   pose_graph_pub_->publish(msg);
+  RCLCPP_INFO(get_logger(), "[DEBUG] publishPoseGraph() COMPLETED successfully");
 }
 
 /*****************************************************************************/
@@ -1243,6 +1267,7 @@ bool SlamToolbox::deserializePoseGraphCallback(
 void SlamToolbox::loopClosurePublishGraphCallback()
 /*****************************************************************************/
 {
+  RCLCPP_INFO(get_logger(), "[DEBUG] Loop closure detected! Requesting pose graph publish");
   requestPoseGraphPublish();
 }
 
