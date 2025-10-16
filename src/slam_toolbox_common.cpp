@@ -176,6 +176,12 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
   threads_.push_back(std::make_unique<boost::thread>(
       boost::bind(&SlamToolbox::publishVisualizations, this)));
 
+  // Create pose graph publish timer (10Hz)
+  pose_graph_timer_ = this->create_wall_timer(
+    std::chrono::milliseconds(100),
+    std::bind(&SlamToolbox::poseGraphPublishTimerCallback, this)
+  );
+
   if (use_lifecycle_manager_) {
     // create bond connection
     createBond();
@@ -200,6 +206,12 @@ CallbackReturn SlamToolbox::on_deactivate(const rclcpp_lifecycle::State &)
     smapper_->getMapper()->RemoveListener(loop_closure_listener_.get());
   }
   loop_closure_listener_.reset();
+
+  // Cancel and reset pose graph timer
+  if (pose_graph_timer_) {
+    pose_graph_timer_->cancel();
+    pose_graph_timer_.reset();
+  }
 
   sst_->on_deactivate();
   sstm_->on_deactivate();
@@ -915,6 +927,32 @@ void SlamToolbox::publishPose(
 }
 
 /*****************************************************************************/
+void SlamToolbox::requestPoseGraphPublish()
+/*****************************************************************************/
+{
+  // Set the flag to request pose graph publishing via timer
+  publish_pose_graph_requested_.store(true);
+}
+
+/*****************************************************************************/
+void SlamToolbox::poseGraphPublishTimerCallback()
+/*****************************************************************************/
+{
+  // Check if pose graph publishing was requested
+  if (publish_pose_graph_requested_.exchange(false)) {
+    // Try to acquire mutex with try_lock
+    boost::unique_lock<boost::mutex> lock(smapper_mutex_, boost::defer_lock);
+    if (lock.try_lock()) {
+      // Successfully acquired mutex, publish pose graph
+      publishPoseGraph();
+    } else {
+      // Failed to acquire mutex, set the flag again to retry later
+      publish_pose_graph_requested_.store(true);
+    }
+  }
+}
+
+/*****************************************************************************/
 void SlamToolbox::publishPoseGraph()
 /*****************************************************************************/
 {
@@ -923,12 +961,6 @@ void SlamToolbox::publishPoseGraph()
   }
 
   slam_toolbox::msg::PoseGraph msg;
-
-  boost::unique_lock<boost::mutex> lock(smapper_mutex_, boost::defer_lock);
-  if (!lock.try_lock()) {
-    RCLCPP_WARN(get_logger(), "Cannot acquire mutex for pose graph - skipping this update");
-    return;
-  }
 
   auto * graph = smapper_->getMapper()->GetGraph();
   if (!graph) return;

@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <memory>
 #include <fstream>
+#include <atomic>
 
 #include "lifecycle_msgs/msg/state.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -135,7 +136,9 @@ protected:
     const Pose2 & pose,
     const Matrix3 & cov,
     const rclcpp::Time & t);
+  void requestPoseGraphPublish();
   void publishPoseGraph();
+  void poseGraphPublishTimerCallback();
   void publishNewNodeEvent(const karto::LocalizedRangeScan* lrs);
 
   // pausing bits
@@ -202,6 +205,10 @@ protected:
   ProcessType processor_type_;
   std::unique_ptr<karto::Pose2> process_near_pose_;
   tf2::Transform reprocessing_transform_;
+
+  // Pose graph publishing control
+  std::atomic<bool> publish_pose_graph_requested_{false};
+  rclcpp::TimerBase::SharedPtr pose_graph_timer_;
 
   // pluginlib
   pluginlib::ClassLoader<karto::ScanSolver> solver_loader_;
