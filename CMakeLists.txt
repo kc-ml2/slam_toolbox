@@ -249,7 +249,7 @@ install(FILES solver_plugins.xml rviz_plugins.xml
 
 ament_export_include_directories(include)
 ament_export_libraries(${libraries} kartoSlamToolbox)
-# ament_export_dependencies(${dependencies} rosidl_default_runtime)
+ament_export_dependencies(${dependencies} rosidl_default_runtime)
 ament_export_dependencies(${dependencies})
 ament_export_targets(SlamToolboxPlugin HAS_LIBRARY_TARGET)
 ament_package()
