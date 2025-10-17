@@ -885,8 +885,8 @@ LocalizedRangeScan * SlamToolbox::addScan(
       scan->header.stamp, update_reprocessing_transform);
     dataset_->Add(range_scan);
 
-    publishNewNodeEvent(range_scan);
     publishPose(range_scan->GetCorrectedPose(), covariance, scan->header.stamp);
+    publishNewNodeEvent(range_scan);
     requestPoseGraphPublish();
   } else {
     delete range_scan;
