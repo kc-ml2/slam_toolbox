@@ -23,6 +23,7 @@
 #include "slam_toolbox/slam_toolbox_common.hpp"
 #include "rclcpp/rclcpp/qos.hpp"
 #include "slam_toolbox/serialization.hpp"
+#include "slam_toolbox/loop_closure_listener.hpp"
 
 namespace slam_toolbox
 {
@@ -150,6 +151,18 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
   sst_->on_activate();
   sstm_->on_activate();
   pose_pub_->on_activate();
+  pose_graph_pub_->on_activate();
+  new_node_event_pub_->on_activate();
+  loop_closure_event_pub_->on_activate();
+
+  loop_closure_listener_ =
+    std::make_unique<slam_toolbox::LoopClosureListener>(
+      loop_closure_event_pub_,
+      this->get_clock(),
+      std::bind(&SlamToolbox::loopClosureCallback, this)
+    );
+  smapper_->getMapper()->AddListener(loop_closure_listener_.get());
+
   reprocessing_transform_.setIdentity();
 
   double transform_publish_period = 0.05;
@@ -162,6 +175,12 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
       this, transform_publish_period)));
   threads_.push_back(std::make_unique<boost::thread>(
       boost::bind(&SlamToolbox::publishVisualizations, this)));
+
+  // Create pose graph publish timer (10Hz)
+  pose_graph_timer_ = this->create_wall_timer(
+    std::chrono::milliseconds(100),
+    std::bind(&SlamToolbox::poseGraphPublishTimerCallback, this)
+  );
 
   if (use_lifecycle_manager_) {
     // create bond connection
@@ -182,9 +201,23 @@ CallbackReturn SlamToolbox::on_deactivate(const rclcpp_lifecycle::State &)
     threads_[i].reset();
   }
   threads_.clear();
+  if (smapper_ && smapper_->getMapper() && loop_closure_listener_) {
+    smapper_->getMapper()->RemoveListener(loop_closure_listener_.get());
+  }
+  loop_closure_listener_.reset();
+
+  // Cancel and reset pose graph timer
+  if (pose_graph_timer_) {
+    pose_graph_timer_->cancel();
+    pose_graph_timer_.reset();
+  }
+
   sst_->on_deactivate();
   sstm_->on_deactivate();
   pose_pub_->on_deactivate();
+  pose_graph_pub_->on_deactivate();
+  new_node_event_pub_->on_deactivate();
+  loop_closure_event_pub_->on_deactivate();
 
   // reset interfaces
   scan_filter_.reset();
@@ -196,6 +229,7 @@ CallbackReturn SlamToolbox::on_deactivate(const rclcpp_lifecycle::State &)
   sstm_.reset();
   sst_.reset();
   pose_pub_.reset();
+  pose_graph_pub_.reset();
   ssReset_.reset();
 
   if (use_lifecycle_manager_) {
@@ -459,6 +493,13 @@ void SlamToolbox::setROSInterfaces()
     "slam_toolbox/reset",
     std::bind(&SlamToolbox::resetCallback, this,
     std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+  pose_graph_pub_ = this->create_publisher<slam_toolbox::msg::PoseGraph>(
+    "slam_toolbox/pose_graph",
+    rclcpp::QoS(rclcpp::KeepLast(1)).transient_local().reliable());
+  new_node_event_pub_ = this->create_publisher<slam_toolbox::msg::NewNodeEvent>(
+    "slam_toolbox/new_node_event", 10);
+  loop_closure_event_pub_ = this->create_publisher<slam_toolbox::msg::LoopClosureEvent>(
+    "slam_toolbox/loop_closure_event", 10);
 
   scan_filter_sub_ =
     std::make_unique<message_filters::Subscriber<sensor_msgs::msg::LaserScan>>(
@@ -867,6 +908,7 @@ LocalizedRangeScan * SlamToolbox::addScan(
     dataset_->Add(range_scan);
 
     publishPose(range_scan->GetCorrectedPose(), covariance, scan->header.stamp);
+    publishNewNodeEvent(range_scan);
   } else {
     delete range_scan;
     range_scan = nullptr;
@@ -898,6 +940,139 @@ void SlamToolbox::publishPose(
   pose_msg.pose.covariance[35] = cov(2, 2) * yaw_covariance_scale_;      // yaw
 
   pose_pub_->publish(pose_msg);
+}
+
+/*****************************************************************************/
+void SlamToolbox::requestPoseGraphPublish()
+/*****************************************************************************/
+{
+  // Set the flag to request pose graph publishing via timer
+  publish_pose_graph_requested_.store(true);
+}
+
+/*****************************************************************************/
+void SlamToolbox::poseGraphPublishTimerCallback()
+/*****************************************************************************/
+{
+  // Check if pose graph publishing was requested
+  bool was_requested = publish_pose_graph_requested_.exchange(false);
+  
+  if (was_requested) {
+    // Try to acquire mutex with try_lock
+    boost::unique_lock<boost::mutex> lock(smapper_mutex_, boost::defer_lock);
+    if (lock.try_lock()) {
+      // Successfully acquired mutex, publish pose graph
+      publishPoseGraph();
+    } else {
+      // Failed to acquire mutex, set the flag again to retry later
+      publish_pose_graph_requested_.store(true);
+    }
+  }
+}
+
+/*****************************************************************************/
+void SlamToolbox::publishPoseGraph()
+/*****************************************************************************/
+{
+  if (pose_graph_pub_->get_subscription_count() == 0) {
+    return;
+  }
+
+  slam_toolbox::msg::PoseGraph msg;
+
+  auto * graph = smapper_->getMapper()->GetGraph();
+  if (!graph) return;
+
+  msg.header.stamp = this->get_clock()->now();
+  msg.header.frame_id = map_frame_;
+
+  VerticeMap mapper_vertices = graph->GetVertices();
+  for (auto vertex_map_it = mapper_vertices.begin();
+       vertex_map_it != mapper_vertices.end(); ++vertex_map_it)
+  {
+    for (auto vertex_it = vertex_map_it->second.begin();
+         vertex_it != vertex_map_it->second.end(); ++vertex_it)
+    {
+      if (!vertex_it->second) { continue; }
+      auto * lrs = vertex_it->second->GetObject();
+      if (!lrs) { continue; }
+
+      slam_toolbox::msg::GraphNode node_msg;
+      node_msg.node_id = lrs->GetUniqueId();
+      node_msg.pose.position.x = lrs->GetCorrectedPose().GetX();
+      node_msg.pose.position.y = lrs->GetCorrectedPose().GetY();
+      node_msg.pose.position.z = 0.0;
+      
+      tf2::Quaternion quat;
+      quat.setRPY(0.0, 0.0, lrs->GetCorrectedPose().GetHeading());
+      node_msg.pose.orientation = tf2::toMsg(quat);
+      
+      msg.nodes.push_back(node_msg);
+    }
+  }
+
+  EdgeVector mapper_edges = graph->GetEdges();
+  for (auto edges_it = mapper_edges.begin();
+       edges_it != mapper_edges.end(); ++edges_it)
+  {
+    if (!(*edges_it)) { continue; }
+
+    slam_toolbox::msg::GraphEdge edge_msg;
+    auto * src = (*edges_it)->GetSource();
+    auto * dst = (*edges_it)->GetTarget();
+    if (!src || !dst || !src->GetObject() || !dst->GetObject()) {
+      continue;
+    }
+    edge_msg.source_id = src->GetObject()->GetUniqueId();
+    edge_msg.target_id = dst->GetObject()->GetUniqueId();
+
+    karto::EdgeLabel * base_label = (*edges_it)->GetLabel();
+    if (!base_label) { continue; }
+    auto * link_info = dynamic_cast<karto::LinkInfo *>(base_label);
+    if (!link_info) { continue; }
+
+    karto::Pose2 rel_pose = link_info->GetPoseDifference();
+    edge_msg.relative_pose.position.x = rel_pose.GetX();
+    edge_msg.relative_pose.position.y = rel_pose.GetY();
+    edge_msg.relative_pose.position.z = 0.0;
+    
+    tf2::Quaternion quat;
+    quat.setRPY(0.0, 0.0, rel_pose.GetHeading());
+    edge_msg.relative_pose.orientation = tf2::toMsg(quat);
+
+    karto::Matrix3 cov = link_info->GetCovariance();
+    for (int r = 0; r < 3; ++r) {
+      for (int c = 0; c < 3; ++c) {
+        edge_msg.covariance[r * 3 + c] = cov(r, c);
+      }
+    }
+
+    msg.edges.push_back(edge_msg);
+  }
+
+  pose_graph_pub_->publish(msg);
+}
+
+/*****************************************************************************/
+void SlamToolbox::publishNewNodeEvent(const karto::LocalizedRangeScan* lrs)
+/*****************************************************************************/
+{
+  if (!new_node_event_pub_ || lrs == nullptr) {
+    return;
+  }
+
+  slam_toolbox::msg::NewNodeEvent ev;
+  ev.stamp = scan_header.stamp;
+  ev.new_node_id = lrs->GetUniqueId();
+  ev.pose.position.x = lrs->GetCorrectedPose().GetX();
+  ev.pose.position.y = lrs->GetCorrectedPose().GetY();
+  ev.pose.position.z = 0.0;
+  
+  tf2::Quaternion quat;
+  quat.setRPY(0.0, 0.0, lrs->GetCorrectedPose().GetHeading());
+  ev.pose.orientation = tf2::toMsg(quat);
+
+  new_node_event_pub_->publish(ev);
 }
 
 /*****************************************************************************/
@@ -1120,6 +1295,13 @@ bool SlamToolbox::resetCallback(
 
   resp->result = resp->RESULT_SUCCESS;
   return true;
+}
+
+/*****************************************************************************/
+void SlamToolbox::loopClosureCallback()
+/*****************************************************************************/
+{
+  requestPoseGraphPublish();
 }
 
 }  // namespace slam_toolbox
