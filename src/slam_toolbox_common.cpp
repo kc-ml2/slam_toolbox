@@ -159,7 +159,7 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
     std::make_unique<slam_toolbox::LoopClosureListener>(
       loop_closure_event_pub_,
       this->get_clock(),
-      std::bind(&SlamToolbox::loopClosureCallback, this)
+      std::bind(&SlamToolbox::requestPoseGraphPublish, this)
     );
   smapper_->getMapper()->AddListener(loop_closure_listener_.get());
 
@@ -175,12 +175,6 @@ CallbackReturn SlamToolbox::on_activate(const rclcpp_lifecycle::State &)
       this, transform_publish_period)));
   threads_.push_back(std::make_unique<boost::thread>(
       boost::bind(&SlamToolbox::publishVisualizations, this)));
-
-  // Create pose graph publish timer (10Hz)
-  pose_graph_timer_ = this->create_wall_timer(
-    std::chrono::milliseconds(100),
-    std::bind(&SlamToolbox::poseGraphPublishTimerCallback, this)
-  );
 
   if (use_lifecycle_manager_) {
     // create bond connection
@@ -205,12 +199,6 @@ CallbackReturn SlamToolbox::on_deactivate(const rclcpp_lifecycle::State &)
     smapper_->getMapper()->RemoveListener(loop_closure_listener_.get());
   }
   loop_closure_listener_.reset();
-
-  // Cancel and reset pose graph timer
-  if (pose_graph_timer_) {
-    pose_graph_timer_->cancel();
-    pose_graph_timer_.reset();
-  }
 
   sst_->on_deactivate();
   sstm_->on_deactivate();
@@ -575,6 +563,12 @@ void SlamToolbox::publishVisualizations()
     if (!isPaused(VISUALIZING_GRAPH)) {
       boost::mutex::scoped_lock lock(smapper_mutex_);
       closure_assistant_->publishGraph();
+      
+      // Check if pose graph publishing was requested (e.g., after loop closure)
+      bool was_requested = publish_pose_graph_requested_.exchange(false);
+      if (was_requested) {
+        publishPoseGraph();
+      }
     }
     r.sleep();
   }
@@ -951,26 +945,6 @@ void SlamToolbox::requestPoseGraphPublish()
 }
 
 /*****************************************************************************/
-void SlamToolbox::poseGraphPublishTimerCallback()
-/*****************************************************************************/
-{
-  // Check if pose graph publishing was requested
-  bool was_requested = publish_pose_graph_requested_.exchange(false);
-  
-  if (was_requested) {
-    // Try to acquire mutex with try_lock
-    boost::unique_lock<boost::mutex> lock(smapper_mutex_, boost::defer_lock);
-    if (lock.try_lock()) {
-      // Successfully acquired mutex, publish pose graph
-      publishPoseGraph();
-    } else {
-      // Failed to acquire mutex, set the flag again to retry later
-      publish_pose_graph_requested_.store(true);
-    }
-  }
-}
-
-/*****************************************************************************/
 void SlamToolbox::publishPoseGraph()
 /*****************************************************************************/
 {
@@ -978,15 +952,23 @@ void SlamToolbox::publishPoseGraph()
     return;
   }
 
-  slam_toolbox::msg::PoseGraph msg;
+  auto msg = std::make_unique<slam_toolbox::msg::PoseGraph>();
 
   auto * graph = smapper_->getMapper()->GetGraph();
   if (!graph) return;
 
-  msg.header.stamp = this->get_clock()->now();
-  msg.header.frame_id = map_frame_;
+  msg->header.stamp = this->get_clock()->now();
+  msg->header.frame_id = map_frame_;
 
   VerticeMap mapper_vertices = graph->GetVertices();
+  
+  // Reserve space for nodes to avoid reallocation
+  size_t total_nodes = 0;
+  for (const auto& vertex_map : mapper_vertices) {
+    total_nodes += vertex_map.second.size();
+  }
+  msg->nodes.reserve(total_nodes);
+  
   for (auto vertex_map_it = mapper_vertices.begin();
        vertex_map_it != mapper_vertices.end(); ++vertex_map_it)
   {
@@ -1007,11 +989,15 @@ void SlamToolbox::publishPoseGraph()
       quat.setRPY(0.0, 0.0, lrs->GetCorrectedPose().GetHeading());
       node_msg.pose.orientation = tf2::toMsg(quat);
       
-      msg.nodes.push_back(node_msg);
+      msg->nodes.push_back(node_msg);
     }
   }
 
   EdgeVector mapper_edges = graph->GetEdges();
+  
+  // Reserve space for edges to avoid reallocation
+  msg->edges.reserve(mapper_edges.size());
+  
   for (auto edges_it = mapper_edges.begin();
        edges_it != mapper_edges.end(); ++edges_it)
   {
@@ -1047,10 +1033,10 @@ void SlamToolbox::publishPoseGraph()
       }
     }
 
-    msg.edges.push_back(edge_msg);
+    msg->edges.push_back(edge_msg);
   }
 
-  pose_graph_pub_->publish(msg);
+  pose_graph_pub_->publish(std::move(msg));
 }
 
 /*****************************************************************************/
@@ -1295,13 +1281,6 @@ bool SlamToolbox::resetCallback(
 
   resp->result = resp->RESULT_SUCCESS;
   return true;
-}
-
-/*****************************************************************************/
-void SlamToolbox::loopClosureCallback()
-/*****************************************************************************/
-{
-  requestPoseGraphPublish();
 }
 
 }  // namespace slam_toolbox
