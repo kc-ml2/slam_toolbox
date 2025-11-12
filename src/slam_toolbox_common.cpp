@@ -563,17 +563,26 @@ void SlamToolbox::publishVisualizations()
     if (!isPaused(VISUALIZING_GRAPH)) {
       boost::mutex::scoped_lock lock(smapper_mutex_);
       closure_assistant_->publishGraph();
-      
-      // Check if pose graph publishing was requested (e.g., after loop closure)
-      bool was_requested = publish_pose_graph_requested_.exchange(false);
-      if (was_requested) {
-        publishPoseGraph();
-      }
     }
+    
+    // Check if pose graph publishing was requested (e.g., after loop closure)
+    bool was_requested = publish_pose_graph_requested_.load();
+    
+    if (was_requested) {
+      // Try to acquire mutex with try_lock
+      boost::unique_lock<boost::mutex> lock(smapper_mutex_, boost::defer_lock);
+      if (lock.try_lock()) {
+        // Double-check after acquiring mutex to ensure request wasn't already processed
+        if (publish_pose_graph_requested_.exchange(false)) {
+          publishPoseGraph();
+        }
+      }
+      // If try_lock fails, flag remains true for next iteration
+    }
+    
     r.sleep();
   }
 }
-
 /*****************************************************************************/
 void SlamToolbox::loadPoseGraphByParams()
 /*****************************************************************************/
